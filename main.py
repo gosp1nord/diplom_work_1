@@ -1,49 +1,16 @@
-from random import randrange
+import db_connect as db
+import get_tokens as gtk
 import json
-from custom_logs import write_log
 import requests
-import os.path
-import shutil
 import vk_api
+from custom_logs import write_log
+from datetime import datetime
 from help import write_help
+from posting_results import set_result_in_chat, write_result_msg, black_white_list
+from random import randrange
+from setting_search import get_cities
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
-from setting_search import get_cities
-from posting_results import set_result_in_chat, write_result_msg, black_white_list
-from datetime import datetime
-
-
-def get_tokens():
-    with open("custom_data/token_group.txt", 'r', encoding='utf-8') as f:
-        token_group = f.read().strip()
-    with open("custom_data/token_user.txt", 'r', encoding='utf-8') as f:
-        token_user = f.read().strip()
-    with open("custom_data/group_id.txt", 'r', encoding='utf-8') as f:
-        group_id = f.read().strip()
-    return token_group, token_user, group_id
-
-def chek_tokens(token_group, token_user, group_id):
-    params_user = {
-        'access_token': token_user,
-        'v': '5.131'
-    }
-    params_group = {
-        'access_token': token_group,
-        'group_id': group_id,
-        'v': '5.131'
-    }
-    url = f"https://api.vk.com/method/account.getInfo"
-    link = f"https://api.vk.com/method/groups.getById"
-    try:
-        response = requests.get(url, params=params_user)
-        if "error" in response.json():
-            return f'Ошибка проверки ключа пользователя: {response.json()["error"]["error_msg"]}'
-        response = requests.get(link, params=params_group)
-        if "error" in response.json():
-            return f'Ошибка проверки ключа группы: {response.json()["error"]["error_msg"]}'
-    except Exception as e:
-        return f"Ошибка запроса проверки ключей: {e}"
-    return False
 
 
 def write_msg(vk, user_id, message, list_city=None, num_keyboard=0):
@@ -73,14 +40,13 @@ def write_msg(vk, user_id, message, list_city=None, num_keyboard=0):
     return res
 
 
-def mssgs(token_group, token_user, group_id, owner_id=''):
+def mssgs(connection, token_group, token_user, group_id, owner_id=''):
     vk = vk_api.VkApi(token=token_group)
     longpoll = VkBotLongPoll(vk, group_id)
     if owner_id:
         message = 'Для начала взаимодействия - отправьте сообщение со словом "старт"\nДля получения справки по функционалу - "помощь"'
         write_msg(vk, owner_id, message)
     step = '1'
-    answer_settings = []
     list_city = []
     first_city_flag = False
     dict_for_delete_msg = dict()
@@ -88,25 +54,14 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
     message_final = ''
     list_yes_no = ["Да", "Нет"]
     res_set_one_user = []
-    user_current_id = ''
+    # user_current_id = ''
     save_flag = False
     for event in longpoll.listen():
-        if os.path.isfile(f'data/{owner_id}/{owner_id}_steps.txt'):
-            with open(f'data/{owner_id}/{owner_id}_steps.txt', 'r', encoding="utf-8") as file_0:
-                step = str(file_0.read().strip())
         if event.type == VkBotEventType.MESSAGE_NEW:
             request = event.message['text']
             owner_id = event.object['message']['from_id']
-
-            if not os.path.exists(f'data/{owner_id}'):
-                os.mkdir(f'data/{owner_id}')
-            if not os.path.isfile(f'data/{owner_id}/{owner_id}_steps.txt'):
-                with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as f:
-                    f.write('1')
-                step = '1'
-            else:
-                with open(f'data/{owner_id}/{owner_id}_steps.txt', 'r', encoding="utf-8") as file_0:
-                    step = str(file_0.read().strip())
+            db.set_line_for_user(connection, owner_id)
+            step = db.get_step(connection, owner_id)
 
             if request.lower() == "привет" and step == '1':
                 message = 'Привет!\nЯ смогу помочь в поиске отношений. Для начала поиска напиши "старт".'
@@ -119,38 +74,22 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
                     write_result_msg(vk, owner_id, message, content_source)
 
             elif request.lower() == "/сохранено":
-                name_file = f'data/{owner_id}/{owner_id}_white_list.txt'
-                if os.path.isfile(name_file):
-                    save_list_ids = []
-                    with open(name_file, 'r', encoding='utf-8') as file:
-                        for item in file:
-                            if item != '\n':
-                                save_list_ids.append(item.strip())
-                    if len(save_list_ids) != 0:
-                        if not os.path.exists(f'data/{owner_id}/temp'):
-                            os.mkdir(f'data/{owner_id}/temp')
-                        with open(f'data/{owner_id}/temp/{owner_id}_200_users_for_out.txt', 'w', encoding='utf-8') as file:
-                            for itrr in save_list_ids:
-                                file.write(itrr + '\n')
-                        if os.path.isfile(f'data/{owner_id}/{owner_id}_steps.txt'):
-                            with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as f:
-                                f.write('6')
-                        save_flag = True
-                        message = 'Сохраненные пользователи:'
-                        write_msg(vk, owner_id, message)
-                        user_current_id = get_id_from_base(owner_id, save_flag)
-                        res_set_one_user = get_pars_photos(token_user, user_current_id, vk, owner_id, save_flag=True)
-                    else:
-                        message = 'Сохраненных пользователей не найдено.'
-                        write_msg(vk, owner_id, message)
+                save_list_ids = db.get_black_white_lists(connection, owner_id, "white")
+                if save_list_ids:
+                    db.set_temp_saved_list(connection, owner_id, save_list_ids)
+                    db.set_step(connection, owner_id, '6')
+                    save_flag = True
+                    message = 'Сохраненные пользователи:'
+                    write_msg(vk, owner_id, message)
+                    user_current_id = get_id_from_base(connection, owner_id, save_flag)
+                    db.set_user_current_id(connection, owner_id, user_current_id)
+                    res_set_one_user = get_pars_photos(token_user, user_current_id, vk, owner_id, save_flag=True)
                 else:
                     message = 'Сохраненных пользователей не найдено.'
                     write_msg(vk, owner_id, message)
 
             elif request.lower() == "/очистить":
-                name_file = f'data/{owner_id}/{owner_id}_black_list.txt'
-                with open(name_file, 'w', encoding="utf-8") as file_0:
-                    pass
+                db.del_record(connection, owner_id, 'black_list_ids')
                 message = 'Стоп-лист пустой.'
                 write_msg(vk, owner_id, message)
 
@@ -162,19 +101,17 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
                     except Exception as e:
                         print(f"не удалось удалить сообщение на шаге {step}")
                         print(e)
-                with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_0:
-                    file_0.write('1')
-                if os.path.isfile(f'data/{owner_id}/temp/{owner_id}_200_users_for_out.txt'):
-                    os.remove(f'data/{owner_id}/temp/{owner_id}_200_users_for_out.txt')
+                db.set_step(connection, owner_id, '1')
+                db.del_record(connection, owner_id, 'temp_saved_list_ids')
+                db.set_settings(connection, owner_id, atr_name='clear', atr_value=0)
                 message = 'Работа остановлена.\nДля возобновления работы отправьте слово "старт"'
                 write_msg(vk, owner_id, message)
                 write_log(f'Остановка поиска для id{owner_id}')
                 save_flag = False
-                # return False
 
             elif step == '1':
                 if request.lower() == "начать" or request.lower() == "старт" or request.lower() == "start" or request.lower() == "/start" or request.lower() == "/старт":
-                    result_check_dir = check_last_finding(owner_id)
+                    result_check_dir = check_last_finding(connection, owner_id)
                     if result_check_dir:
                         message = 'Остались непросмотренные результаты с прошлого поиска. Продолжить их?\n"Да" - продолжить\n"Нет" - начнем заново.'
                         write_msg(vk, owner_id, message, list_city=list_yes_no, num_keyboard=2)
@@ -182,8 +119,7 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
                         text = f'Для начала работы нужно настроить параметры поиска:\n- город,\n- возраст,\n- пол,\n- отношения.\nПоиск будет производиться только открытых аккаунтов. Начнем с названия города - впишите его в ответном сообщении...'
                         write_msg(vk, owner_id, text)
                         write_log(f'Старт настроек поиска для id{owner_id}')
-                        with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_1:
-                            file_1.write('2')
+                        db.set_step(connection, owner_id, '2')
                 else:
                     write_msg(vk, owner_id, 'Не понял вашего ответа...\nДля начала взаимодействия - отправьте сообщение со словом "старт"\nДля получения справки по функционалу - "помощь"')
             elif step == '2':
@@ -210,9 +146,8 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
                         message_ex = 'Пожалуйста, пишите корректные цифры возраста. Допустимо писать цифры от 18 до 100.'
                         write_msg(vk, owner_id, message_ex, num_keyboard=0)
                     else:
-                        answer_settings.append(age)
-                        with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_1:
-                            file_1.write('4')
+                        db.set_settings(connection, owner_id, atr_name='age', atr_value=age)
+                        db.set_step(connection, owner_id, '4')
                         message = 'Выбрать пол для поиска...'
                         list_temp = ["М", "Ж"]
                         write_msg(vk, owner_id, message, list_city=list_temp, num_keyboard=2)
@@ -232,39 +167,37 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
                 write_msg(vk, owner_id, message, list_city=list_yes_no, num_keyboard=2)
             elif step == '6':
                 message = f'Сообщение не распознано!\nДля выбора действия - нажмите кнопку\n(или напишите "стоп", чтобы остановить поиск и начать сначала)...'
+                user_current_id = db.get_user_current_id(connection, owner_id)
                 content_source = f'{{"type": "url", "url": "https://vk.com/id{user_current_id}"}}'
                 write_result_msg(vk, owner_id, message, content_source)
 
         elif event.type == VkBotEventType.MESSAGE_EVENT:
             owner_id = event.object['user_id']
-            with open(f'data/{owner_id}/{owner_id}_steps.txt', 'r', encoding="utf-8") as file_0:
-                step = str(file_0.read().strip())
-
+            step = db.get_step(connection, owner_id)
             if step == '1':
                 dict_for_delete_msg = get_dict_for_delete(vk, owner_id, group_id, token_user)
                 vk.method('messages.delete', values=dict_for_delete_msg)
                 if event.object['payload'] == 100001:
                     write_log(f'Продолжение просмотра предыдущего поиска для id{owner_id}')
-                    user_current_id = get_id_from_base(owner_id, save_flag)
+                    user_current_id = get_id_from_base(connection, owner_id, save_flag)
+                    db.set_user_current_id(connection, owner_id, user_current_id)
                     res_set_one_user = get_pars_photos(token_user, user_current_id, vk, owner_id, save_flag)
-                    with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_1:
-                        file_1.write('6')
+                    db.set_step(connection, owner_id, '6')
                 elif event.object['payload'] == 100002:
-                    shutil.rmtree(f'data/{owner_id}/temp')
+                    db.del_table(connection, f't_{owner_id}')
                     text = f'Для начала работы нужно настроить параметры поиска:\n- город,\n- возраст,\n- пол,\n- отношения.\nПоиск будет производиться только открытых аккаунтов. Начнем с названия города - впишите его в ответном сообщении...'
                     write_msg(vk, owner_id, text)
                     write_log(f'Старт настроек поиска для id{owner_id}')
-                    with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_1:
-                        file_1.write('2')
-
+                    db.set_settings(connection, owner_id, atr_name='clear', atr_value=0)
+                    db.set_step(connection, owner_id, '2')
             elif step == '2':
                 if event.object['payload'] == 100001 and len(current_city) != 0:
                     dict_for_delete_msg = get_dict_for_delete(vk, owner_id, group_id, token_user)
                     vk.method('messages.delete', values=dict_for_delete_msg)
                     write_msg(vk, owner_id, message_final, num_keyboard=0)
-                    answer_settings.append([current_city[0], current_city[1][0]])
-                    with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_1:
-                        file_1.write('3')
+                    db.set_settings(connection, owner_id, atr_name='city_number', atr_value=current_city[0])
+                    db.set_settings(connection, owner_id, atr_name='city_name', atr_value=current_city[1][0])
+                    db.set_step(connection, owner_id, '3')
                     message = 'Возраст для поиска? (только цифры, от 18 до 100)...'
                     write_msg(vk, owner_id, message, num_keyboard=0)
                 elif event.object['payload'] == 100002 and len(current_city) != 0:
@@ -295,9 +228,8 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
                 dict_for_delete_msg = get_dict_for_delete(vk, owner_id, group_id, token_user)
                 vk.method('messages.delete', values=dict_for_delete_msg)
                 write_msg(vk, owner_id, message_final, num_keyboard=0)
-                answer_settings.append(sex)
-                with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_1:
-                    file_1.write('5')
+                db.set_settings(connection, owner_id, atr_name='sex', atr_value=sex)
+                db.set_step(connection, owner_id, '5')
                 message = 'Состоит ли в отношениях с кем-то? В ответ прислать цифру:\n"Да" - есть отношения (в браке, в гражданском браке, в отношениях и т.д.)\n"Нет" - не в отношениях'
                 write_msg(vk, owner_id, message, list_city=list_yes_no, num_keyboard=2)
             elif step == '5':
@@ -311,29 +243,30 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
                 dict_for_delete_msg = get_dict_for_delete(vk, owner_id, group_id, token_user)
                 vk.method('messages.delete', values=dict_for_delete_msg)
                 write_msg(vk, owner_id, message_final, num_keyboard=0)
-                answer_settings.append(status)
+                db.set_settings(connection, owner_id, atr_name='status', atr_value=status)
                 message = "\nПоиск..."
                 write_msg(vk, owner_id, message, num_keyboard=0)
                 ###################################################################################
-                len_ids = main_search(answer_settings, owner_id, token_user)
+                answer_settings = db.get_settings(connection, owner_id)
+                len_ids = main_search(connection, answer_settings, owner_id, token_user)
                 if len_ids == 0:
                     message = f'По этим настройкам никого не найдено. Попробуйте снова...'
                     write_log(f'Для id{owner_id} найдено {len_ids} аккаунтов.')
                     write_msg(vk, owner_id, message, num_keyboard=0)
-                    with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_8:
-                        file_8.write('1')
+                    db.set_step(connection, owner_id, '1')
+                    db.set_settings(connection, owner_id, atr_name='clear', atr_value=0)
                 else:
                     message = f'Найдено {len_ids} аккаунтов. Идет обработка...'
                     write_log(f'Для id{owner_id} найдено {len_ids} аккаунтов.')
                     write_msg(vk, owner_id, message, num_keyboard=0)
-                    second_phase(token_user, owner_id)
-                    create_base_keys_and_ids(owner_id)
-                    user_current_id = get_id_from_base(owner_id, save_flag)
+                    second_phase(token_user, owner_id, connection)
+                    user_current_id = get_id_from_base(connection, owner_id, save_flag)
+                    db.set_user_current_id(connection, owner_id, user_current_id)
                     res_set_one_user = get_pars_photos(token_user, user_current_id, vk, owner_id, save_flag)
-                    with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_1:
-                        file_1.write('6')
+                    db.set_step(connection, owner_id, '6')
 
             elif step == '6':
+                user_current_id = db.get_user_current_id(connection, owner_id)
                 content_source = f'{{"type": "url", "url": "https://vk.com/id{user_current_id}"}}'
                 if event.object['payload'] == 303:
                     message = f"{res_set_one_user[1]}"
@@ -344,24 +277,27 @@ def mssgs(token_group, token_user, group_id, owner_id=''):
                     write_result_msg(vk, owner_id, message, content_source, num_keyboard=3)
 
                 elif event.object['payload'] == 301:
-                    black_white_list(owner_id, user_current_id, 0)
+                    user_current_id = db.get_user_current_id(connection, owner_id)
+                    black_white_list(connection, owner_id, user_current_id, 0)
                     message = f'--------------------------\n\nПользователь "{res_set_one_user[1]}" добавлен в стоп-лист и исключен из поиска.'
                     write_result_msg(vk, owner_id, message, content_source, num_keyboard=3)
 
                 elif event.object['payload'] == 302:
-                    black_white_list(owner_id, user_current_id, 1)
+                    user_current_id = db.get_user_current_id(connection, owner_id)
+                    black_white_list(connection, owner_id, user_current_id, 1)
                     message = f'--------------------------\n\nПользователь "{res_set_one_user[1]}" сохранен.'
                     write_result_msg(vk, owner_id, message, content_source, num_keyboard=3)
 
                 elif event.object['payload'] == 304:
                     message = '--------------------------'
                     write_result_msg(vk, owner_id, message, content_source, num_keyboard=0)
-                    user_current_id = get_id_from_base(owner_id, save_flag)
+                    user_current_id = get_id_from_base(connection, owner_id, save_flag)
+                    db.set_user_current_id(connection, owner_id, user_current_id)
                     if user_current_id:
                         res_set_one_user = get_pars_photos(token_user, user_current_id, vk, owner_id, save_flag)
                     else:
-                        with open(f'data/{owner_id}/{owner_id}_steps.txt', 'w', encoding="utf-8") as file_0:
-                            file_0.write('1')
+                        db.set_step(connection, owner_id, '1')
+                        db.set_settings(connection, owner_id, atr_name='clear', atr_value=0)
                         message = 'Пользователей больше нет.\nДля возобновления поиска отправьте слово "старт"'
                         write_msg(vk, owner_id, message)
                         save_flag = False
@@ -391,22 +327,11 @@ def get_dict_for_delete(vk, owner_id, group_id, token_user):
             return dict_for_delete_msg
 
 
-def check_last_finding(owner_id):
-    path_dir = f'data/{owner_id}/temp'
-    if os.path.exists(path_dir):
-        list_files = os.listdir(path_dir)
-        for item in list_files:
-            temp_list = []
-            with open(f'{path_dir}/{item}', 'r', encoding="utf-8") as file:
-                for itr in file:
-                    if itr != '\n':
-                        temp_list.append(itr.strip())
-            if len(temp_list) != 0:
-                return True
-    return False
+def check_last_finding(connection, owner_id):
+    res = db.check_table(connection, owner_id)
+    return res
 
-
-def main_search(answer_settings, owner_id, token_user):
+def main_search(connection, answer_settings, owner_id, token_user):
     city = answer_settings[0][0]
     age = answer_settings[1]
     start_year = datetime.now().year - age
@@ -430,14 +355,14 @@ def main_search(answer_settings, owner_id, token_user):
                     if i not in temp_list_result:
                         temp_list_result.append(i)
         break
-    list_result = check_black_white_list(owner_id, temp_list_result)
+    list_result = check_black_white_list(connection, owner_id, temp_list_result)
     with open('temp/temp_result_ids.txt', 'w', encoding='utf-8') as file:
         for item in list_result:
             file.write(str(item) + '\n')
     return len(list_result)
 
 
-def second_phase(token_user, owner_id):
+def second_phase(token_user, owner_id, connection):
     list_user_id = [owner_id]
     data_user_groups = get_info_about_user_group(token_user, list_user_id)
     if data_user_groups['response'][0]['groups'] == False:
@@ -473,67 +398,17 @@ def second_phase(token_user, owner_id):
             dict_weight_users[f"{weight}"] = temp
         else:
             dict_weight_users[f"{weight}"] = [ittrz[0]]
-    with open(f'data/{owner_id}/{owner_id}_dict_weight_users.json', 'w', encoding='utf-8') as file:
-        json.dump(dict_weight_users, file)
+    db.create_table_for_out(connection, owner_id)
+    db.set_table_for_out(connection, owner_id, dict_weight_users)
     return dict_weight_users
 
 
-def create_base_keys_and_ids(owner_id, save_flag=0):
+def get_id_from_base(connection, owner_id, save_flag):
     if save_flag:
-        pass
+        current_id = db.get_id_from_temp_saved_list(connection, owner_id)
     else:
-        with open(f'data/{owner_id}/{owner_id}_dict_weight_users.json', 'r', encoding='utf-8') as file1:
-            dict_weight_users = json.load(file1)
-
-        temp_list_keys = []
-        for key in dict_weight_users.keys():
-            temp_list_keys.append(key)
-        temp_list_keys.sort()
-        if not os.path.exists(f'data/{owner_id}/temp'):
-            os.mkdir(f'data/{owner_id}/temp')
-        for key in temp_list_keys:
-            with open(f'data/{owner_id}/temp/{owner_id}_keys_users.txt', 'a', encoding='utf-8') as file:
-                file.write(key + '\n')
-            with open(f'data/{owner_id}/temp/{owner_id}_{key}_users_for_out.txt', 'w', encoding='utf-8') as f:
-                for item in dict_weight_users[key]:
-                    f.write(item + '\n')
-
-def get_id_from_base(owner_id, save_flag):
-    while True:
-        temp_list_keys_ = []
-        temp_list_ids_ = []
-        if save_flag:
-            current_key = 200
-        else:
-            with open(f'data/{owner_id}/temp/{owner_id}_keys_users.txt', 'r', encoding='utf-8') as file:
-                for item in file:
-                    temp_list_keys_.append(item.strip())
-            if len(temp_list_keys_):
-                current_key = temp_list_keys_[-1]
-            else:
-                print("Ключики закончились для вывода")
-                return False
-        with open(f'data/{owner_id}/temp/{owner_id}_{current_key}_users_for_out.txt', 'r', encoding='utf-8') as f1:
-            for item in f1:
-                temp_list_ids_.append(item.strip())
-
-        if len(temp_list_ids_):
-            current_id = temp_list_ids_.pop()
-            with open(f'data/{owner_id}/temp/{owner_id}_{current_key}_users_for_out.txt', 'w', encoding='utf-8') as f2:
-                for itter in temp_list_ids_:
-                    f2.write(itter + '\n')
-            return current_id
-        else:
-            os.remove(f'data/{owner_id}/temp/{owner_id}_{current_key}_users_for_out.txt')
-            if save_flag:
-                # save_flag = False
-                return False
-            else:
-                temp_list_keys_.pop()
-                with open(f'data/{owner_id}/temp/{owner_id}_keys_users.txt', 'w', encoding='utf-8') as fil:
-                    for it in temp_list_keys_:
-                        fil.write(it + '\n')
-
+        current_id = db.get_id_from_table_for_out(connection, owner_id)
+    return current_id
 
 def get_pars_photos(token_user, current_id, vk, owner_id, save_flag):
     answer_for_photos = get_foto_user(token_user, current_id)
@@ -548,19 +423,14 @@ def get_pars_photos(token_user, current_id, vk, owner_id, save_flag):
         return False
 
 
-def check_black_white_list(owner_id, temp_list_result):
+def check_black_white_list(connection, owner_id, temp_list_result):
     res_list = temp_list_result
-    temp_list_adres = [f'data/{owner_id}/{owner_id}_white_list.txt', f'data/{owner_id}/{owner_id}_black_list.txt']
+    temp_list_color = ['white', 'black']
     for i in range(2):
-        temp_list = []
-        if os.path.isfile(temp_list_adres[i]):
-            with open(temp_list_adres[i], 'r', encoding='utf-8') as f3:
-                for item_bw_list in f3:
-                    temp_list.append(int(item_bw_list.strip()))
+        temp_list = db.get_black_white_lists(connection, owner_id, temp_list_color[i])
+        if temp_list:
             res_list = list(set(res_list) - set(temp_list))
     return res_list
-
-
 
 def get_info_about_user_group(token_user, work_list):
     url = f"https://api.vk.com/method/execute"
@@ -706,18 +576,20 @@ def get_info_about_users(token_user, sex, city, year, half_year):
 
 
 def main_main():
-    token_group, token_user, group_id = get_tokens()
-    print(token_group)
-    print(token_user)
-    res_chek = chek_tokens(token_group, token_user, group_id)
+    token_group, token_user, group_id = gtk.get_tokens()
+    res_chek = gtk.chek_tokens(token_group, token_user, group_id)
     owner_id = ''
     if res_chek:
         write_log(res_chek)
         exit()
+    connection = db.get_connect()
+    db.create_tables(connection)
+    print("старт")
     while True:
-        mssgs(token_group, token_user, group_id, owner_id)
+        mssgs(connection, token_group, token_user, group_id, owner_id)
         print("Рестарт")
 
 
 if __name__ == "__main__":
     main_main()
+

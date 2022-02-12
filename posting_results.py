@@ -1,8 +1,8 @@
-from random import randrange
+import db_connect as db
 import requests
 import time
+from random import randrange
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-
 
 
 def write_result_msg(vk, user_id, message, content_source, attachment=None, num_keyboard=1, save_flag=False):
@@ -53,7 +53,6 @@ def write_result_msg(vk, user_id, message, content_source, attachment=None, num_
     return res
 
 
-
 def set_result_in_chat(vk, owner_id, token_user, list_in, save_flag):
     list_short_link = get_short_link(token_user, list_in)
     content_source = f'{{"type": "url", "url": "https://vk.com/id{list_in[0]}"}}'
@@ -61,7 +60,7 @@ def set_result_in_chat(vk, owner_id, token_user, list_in, save_flag):
     for photo_id in list_in[2]:
         count += 1
         if count == 1:
-            message = f"{list_in[1]}"
+            message = f"[id{list_in[0]}|{list_in[1]}]"
         else:
             message = None
         if count == len(list_in[2]):
@@ -73,15 +72,12 @@ def set_result_in_chat(vk, owner_id, token_user, list_in, save_flag):
     return list_short_link
 
 
-def black_white_list(id_owner, id_user, var):
+def black_white_list(connection, owner_id, id_user, var):
     if var:
-        name_file = f'data/{id_owner}/{id_owner}_white_list.txt'
+        color = 'white'
     else:
-        name_file = f'data/{id_owner}/{id_owner}_black_list.txt'
-    with open(name_file, 'a', encoding="utf-8") as file_0:
-            file_0.write(str(id_user) + '\n')
-
-
+        color = 'black'
+    db.set_black_white_lists(connection, owner_id, id_user, color)
 
 def get_short_link(token_user, list_in):
     url = "https://api.vk.com/method/utils.getShortLink"
